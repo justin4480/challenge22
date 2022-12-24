@@ -27,6 +27,9 @@ class Board:
 
     def __init__(self, input_array):
         self._input_array = input_array
+        self.manhattan_kernel = np.array([[0, 1, 0],
+                                          [1, 1, 1],
+                                          [0, 1, 0]])
 
     @property
     def scrap_amount(self):
@@ -61,40 +64,65 @@ class Board:
         return self.scrap_amount == 0
 
     @property
-    def live_tile(self):
+    def scrap_amount_k3_manh(self):
+        return convolve2d(self.scrap_amount, self.manhattan_kernel, mode='same').astype(int)
+
+    @property
+    def owner_me(self):
+        return self.owner == 1
+
+    @property
+    def owner_me_k3_manh(self):
+        return convolve2d(self.owner_me, self.manhattan_kernel, mode='same').astype(int)
+
+    @property
+    def owner_op(self):
+        return self.owner == 0
+
+    @property
+    def owner_op_k3_manh(self):
+        return convolve2d(self.owner_op, self.manhattan_kernel, mode='same').astype(int)
+
+    @property
+    def owner_ne(self):
+        return self.owner == -1
+
+    @property
+    def owner_ne_k3_manh(self):
+        return convolve2d(self.owner_ne, self.manhattan_kernel, mode='same').astype(int)
+
+    @property
+    def tile_live(self):
         return (self.scrap_amount > 0) * (self.recycler == 0)
 
     @property
-    def live_tile_k3(self):
-        return convolve2d(self.live_tile, np.ones((3, 3)), mode='same').astype(int)
+    def tile_live_k3_manh(self):
+        return convolve2d(self.tile_live, self.manhattan_kernel, mode='same').astype(int)
 
     @property
-    def live_tile_k5(self):
-        return convolve2d(self.live_tile, np.ones((5, 5)), mode='same').astype(int)
+    def tile_dead(self):
+        return self.tile_live == 0
 
     @property
-    def owner_me_k3(self):
-        return convolve2d(self.owner == 1, np.ones((3, 3)), mode='same').astype(int)
+    def tile_dead_k3_manh(self):
+        return convolve2d(self.tile_dead, self.manhattan_kernel, mode='same').astype(int)
 
     @property
-    def owner_op_k3(self):
-        return convolve2d(self.owner == 0, np.ones((3, 3)), mode='same').astype(int)
+    def units_op(self):
+        return self.units * (self.owner == 0)
 
     @property
-    def owner_ne_k3(self):
-        return convolve2d((self.owner == -1) * (self.is_grass == 0), np.ones((3, 3)), mode='same').astype(int)
+    def units_op_k3_manh(self):
+        return convolve2d(self.units_op, self.manhattan_kernel, mode='same').astype(int)
 
     @property
-    def owner_me_k5(self):
-        return convolve2d(self.owner == 1, np.ones((5, 5)), mode='same').astype(int)
+    def units_me(self):
+        return self.units * (self.owner == 1)
 
     @property
-    def owner_op_k5(self):
-        return convolve2d(self.owner == 0, np.ones((5, 5)), mode='same').astype(int)
+    def units_me_k3_manh(self):
+        return convolve2d(self.units_me, self.manhattan_kernel, mode='same').astype(int)
 
-    @property
-    def owner_ne_k5(self):
-        return convolve2d((self.owner == -1) * (self.is_grass == 0), np.ones((5, 5)), mode='same').astype(int)
 
 
 class InputOutput:
