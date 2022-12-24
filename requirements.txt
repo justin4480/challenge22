@@ -1,0 +1,9 @@
+# conda create -n challenge22 python=3.9.12 numpy=1.22.3 scipy=1.8.0
+# conda activate challenge22
+
+# for development
+# conda install black pytest pytest-cov jupyterlab matplotlib seaborn
+
+python==3.9.12
+numpy==1.22.3
+scipy==1.8.0
