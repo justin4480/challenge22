@@ -7,6 +7,7 @@ from scipy.signal import convolve2d
 # import seaborn as sns
 
 verbose = False
+print_input_logs = True
 
 def debug(message) -> None:
     print(message, file=sys.stderr, flush=True)
@@ -26,6 +27,9 @@ def input_stream(filename):
     return inner
 
 
+min_max = lambda x: (x - x.min()) / (x.max() - x.min() + 1e-10)
+
+
 def get_filter(rows, cols):
     n = max(rows, cols) * 2 + 1
     p = 0.9
@@ -41,10 +45,11 @@ class Board:
 
     def __init__(self, input_array):
         self._input_array = input_array
-        self.manhattan_3_3_kernel = np.array([[0, 1, 0],
-                                          [1, 1, 1],
-                                          [0, 1, 0]])
-        self.manhattan_kernel = get_filter(input_array.shape[0], input_array.shape[1])
+        self.manhattan_local_kernel = np.array([[0, 1, 0],
+                                                [1, 1, 1],
+                                                [0, 1, 0]])
+        self.manhattan_global_kernel = get_filter(input_array.shape[0],
+                                                  input_array.shape[1])
         
 
     @property
@@ -144,50 +149,9 @@ class Board:
         return self._input_array[:, :, 3] * (self.owner == 1)
 
 
-# def get_move_actions(board):
-#     min_max = lambda x: (x - x.min()) / (x.max() - x.min())
-
-#     results = []
-#     actions = []
-
-#     for row, col in np.argwhere(board.units_me):
-#         a = np.full_like(board.scrap_amount, 0, dtype=np.float64)
-#         current_unit = np.zeros_like(a)
-#         current_unit[row, col] = 1
-#         units_me_k3_manh_excl_current_unit = convolve2d(
-#             board.units * (board.owner == 1) * (current_unit == 0),
-#             board.manhattan_kernel, mode='same'
-#         ).astype(int)
-
-#         a += +1 * min_max(board.scrap_amount_k3_manh)
-#         a += +4 * min_max(board.owner_op_k3_manh)
-#         a += -4 * min_max(board.owner_me_k3_manh)
-#         a += +2 * min_max(board.owner_ne_k3_manh)
-#         a += +1 * min_max(board.tile_live_k3_manh)
-#         a += -1 * min_max(board.tile_dead_k3_manh)
-#         a += +1 * min_max(board.units_op_k3_manh)        
-#         a += -2 * min_max(units_me_k3_manh_excl_current_unit)
-
-#         legal_moves = board.tile_live * convolve2d(current_unit, np.array([[0,1,0],[1,0,1],[0,1,0]]), mode='same')
-#         scores = a * np.where(legal_moves, 1, np.nan)
-#         max_value, max_indices = np.nanmax(scores), np.unravel_index(np.nanargmax(scores), scores.shape)
-#         actions.append(f"MOVE 1 {col} {row} {max_indices[1]} {max_indices[0]}")
-#         results.append({'row_col': (row, col), 'max_indices': max_indices, 'max_value': max_value})
-    # if verbose:
-        # debug('get_move_actions scores')
-#         debug(scores)
-#         if False:
-#             default_params = {'linecolor': 'black', 'linewidths': .5, 'square': True, 'cbar': False, 'annot': True, 'fmt': ".2f"}
-#             sns.heatmap(**default_params, data=b).set_title(f"{max_value=} Action: MOVE 1 {col} {row} {max_indices[1]} {max_indices[0]}")
-#             plt.show()
-
-#     return actions
-
-
 def get_move_actions(board, weights):
     results = []
     actions = []
-    min_max = lambda x: (x - x.min()) / (x.max() - x.min())
 
     a = np.full_like(board.scrap_amount, 0, dtype=np.float64)
 
@@ -207,7 +171,7 @@ def get_move_actions(board, weights):
         legal_moves = board.tile_live * convolve2d(current_unit, np.array([[0,1,0],[1,0,1],[0,1,0]]), mode='same')
         scores = a * np.where(legal_moves, 1, np.nan)
         if np.all(np.isnan(scores)):
-            break
+            continue
         max_value, max_indices = np.nanmax(scores), np.unravel_index(np.nanargmax(scores), scores.shape)
         actions.append(f"MOVE 1 {col} {row} {max_indices[1]} {max_indices[0]}")
         results.append({'row_col': (row, col), 'max_indices': max_indices, 'max_value': max_value})
@@ -226,52 +190,24 @@ def get_spawn_random(board, k=1):
     row, col = options[np.random.randint(0, len(options))]
     return [] if row is None else [f"SPAWN {k} {col} {row}"]
 
-# def get_spawn_1(board, k=1):
-#     min_max = lambda x: (x - x.min()) / (x.max() - x.min())
 
-#     a = np.full_like(board.scrap_amount, 0, dtype=np.float64)
-
-#     a += +1 * min_max(board.scrap_amount_k3_manh)
-#     a += +9.0 * min_max(board.owner_op_k3_manh)
-#     a += +3.0 * min_max(board.owner_op_k7_ones)
-#     a += +1.0 * min_max(board.owner_op_k11_ones)
-#     a += +0.3 * min_max(board.owner_op_k15_ones)
-#     a += +0.1 * min_max(board.owner_op_k19_ones)
-#     a += -5 * min_max(board.owner_me_k3_manh)
-#     a += +5 * min_max(board.owner_ne_k3_manh)
-#     a += +0.3 * min_max(board.owner_ne_k15_ones)
-#     a += +1 * min_max(board.tile_live_k3_manh)
-#     a += -1 * min_max(board.tile_dead_k3_manh)
-#     a += +1 * min_max(board.units_op_k3_manh)
-
-#     legal_moves = board.can_spawn
-#     scores = a * np.where(legal_moves, 1, np.nan)
-#     if np.all(np.isnan(scores)):
-#         return ["SPAWN 1 0 0"]
-#     max_value, max_indices = np.nanmax(scores), np.unravel_index(np.nanargmax(scores), scores.shape)
-#     row, col = max_indices
-#     return [f"SPAWN {k} {col} {row}"]
-
-def get_spawn_2(board, k=1):
-    min_max = lambda x: (x - x.min()) / (x.max() - x.min())
+def get_spawn_2(board, weights, k=1):
     new_spawns = np.full_like(board.scrap_amount, 0, dtype=np.float64)
     actions = []
 
     for i in range(k):
-        legal_moves = board.can_spawn * (new_spawns == 0)
+        # (board.units_me == 0) is to prevent spawning on top of own units
+        legal_moves = (
+            board.can_spawn * (new_spawns == 0) * (board.recycler == 0) * (board.units_me == 0)
+        )
         if legal_moves.sum() == 0:
             break
 
         a = np.full_like(board.scrap_amount, 0, dtype=np.float64)
 
-        a += +1 * min_max(board.scrap_amount_k3_manh)
-        a += +9 * min_max(board.owner_op_k3_manh)
-        a += -5 * min_max(board.owner_me_k3_manh)
-        a += +5 * min_max(board.owner_ne_k3_manh)
-        a += +1 * min_max(board.tile_live_k3_manh)
-        a += -1 * min_max(board.tile_dead_k3_manh)
-        a += +1 * min_max(board.units_op_k3_manh)
-        a += -2 * min_max(board.units_me_k3_manh)
+        for feature, weight in weights.items():
+            a += weight * min_max(getattr(board, feature))
+
         if i > 0:
             a += -2 * min_max(convolve2d(new_spawns, board.manhattan_kernel, mode='same').astype(int))
 
@@ -293,11 +229,19 @@ class InputOutput:
         self.output_log = []
 
     def get_input(self, n: int = 1) -> None:
-        self.input_log += [self.input() for _ in range(n)]
-        lst = [i.split() for i in self.input_log[-n:]]
-        return [int(item) for sublist in lst for item in sublist]
+        if False:
+            lst = [self.input().split() for _ in range(n)]
+            return [int(item) for sublist in lst for item in sublist]
+        else:
+            self.input_log += [self.input() for _ in range(n)]
+            if print_input_logs:
+                [debug(log) for log in self.input_log[-n:]]
+            lst = [i.split() for i in self.input_log[-n:]]
+            return [int(item) for sublist in lst for item in sublist]
 
     def send_action(self, actions: list):
+        if len(actions) == 0:
+            actions = ["WAIT"]
         message = ";".join(action.__str__() for action in actions)
         self.output_log.append(message)
         print(f"{message}")
@@ -328,19 +272,17 @@ def main():
             board = Board(input_array)
             actions = []
             actions += get_move_actions(board, weights)
-            if my_matter >= 10 and board.units_op.sum() > 0:
-                if board.can_build.sum() > 0:
-                    if (max(1, board.recycler_me.sum()) / board.units_me.sum()) < 0.25:
+            if board.units_op.sum() > 0:
+                if my_matter >= 10 and board.can_build.sum() > 0:
+                    # if (board.units_me.sum() / max(1, board.recycler_me.sum())) > 6:
+                    if board.recycler_me.sum() / board.owner_me.sum() < 0.1:
                         actions += get_build_random(board)
-                if board.can_spawn.sum() > 0:
-                    if my_matter >= 10:
-                        actions += get_spawn_2(board, k=(my_matter) // 10)
+                        my_matter = 10
+                if my_matter >= 10 and board.can_spawn.sum() > 0:
+                    k = (my_matter) // 10
+                    actions += get_spawn_2(board, weights, k)
+                    my_matter -= k * 10
             io.send_action(actions)
-            if verbose:
-                debug('input_log')
-                debug('\n'.join(io.input_log))
-                debug('output_log')
-                debug('\n'.join(io.output_log))
         except EOFError:
             debug("EOF")
             break
