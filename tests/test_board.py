@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from main import InputOutput, Board
+from challenge22 import InputOutput, Board
 
 
 @pytest.fixture
