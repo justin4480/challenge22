@@ -1,4 +1,8 @@
 import cProfile
-from challenge22 import main
+from p3_get_spawn_update import main
 
-cProfile.run('main()', sort='tottime')
+# cProfile.run('main()', sort='tottime')
+cProfile.run('main()', sort='cumtime')
+
+# 2113 function calls (2059 primitive calls) in 0.013 seconds p329
+# 2104 function calls (2050 primitive calls) in 0.024 seconds challenge
