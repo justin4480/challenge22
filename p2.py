@@ -1,6 +1,7 @@
 dev = False if __file__ == '/tmp/Answer.py' else True
 
 import sys
+import concurrent.futures
 import numpy as np
 from scipy.signal import convolve2d
 from scipy import ndimage
@@ -125,10 +126,10 @@ class Board:
         func = self._input_array[:, :, 6] * self.island_mask
         return self.cached('in_range_of_recycler', func)
 
-    @property
-    def is_grass(self):
-        func = (self.scrap_amount == 0) * self.island_mask
-        return self.cached('is_grass', func)
+    # @property
+    # def is_grass(self):
+    #     func = (self.scrap_amount == 0) * self.island_mask
+    #     return self.cached('is_grass', func)
 
     @property
     def should_build(self):
@@ -182,10 +183,10 @@ class Board:
         func = convolve2d(self.scrap_amount * self.island_mask, self.kernel_manhattan, mode='same')
         return self.cached('scrap_amount_local', func)
 
-    @property
-    def tile_live_global(self):
-        func = convolve2d(self.tile_live * self.island_mask, self.kernel_global, mode='same')
-        return self.cached('tile_live_global', func)
+    # @property
+    # def tile_live_global(self):
+    #     func = convolve2d(self.tile_live * self.island_mask, self.kernel_global, mode='same')
+    #     return self.cached('tile_live_global', func)
 
     @property
     def owner_me_global(self):
@@ -202,10 +203,10 @@ class Board:
         func = convolve2d(self.owner_ne * self.island_mask, self.kernel_global, mode='same')
         return self.cached('owner_ne_global', func)
 
-    @property
-    def owner_op_3_3_sq(self):
-        func = convolve2d(self.owner_op * self.island_mask, self.kernel_3_3_ones, mode='same')
-        return self.cached('owner_op_3_3_sq', func)
+    # @property
+    # def owner_op_3_3_sq(self):
+    #     func = convolve2d(self.owner_op * self.island_mask, self.kernel_3_3_ones, mode='same')
+    #     return self.cached('owner_op_3_3_sq', func)
 
     @property
     def units_op_global(self):
@@ -231,6 +232,19 @@ class Board:
     #                     ).set_title(f'island #{self.island_number} property: {property}')
     #     else:
     #         sns.heatmap(getattr(self, property), square=True, cbar=False,
+    #                     linecolor='white', linewidths=.1, annot=True, fmt='.1f'
+    #                     ).set_title(f'island #{self.island_number} property: {property}')
+
+    # def print_custom(self, array, include_island=True):
+    #     if include_island:
+    #         fig, ax = plt.subplots(2, sharex=True)
+    #         sns.heatmap(self.island, square=True, cbar=False, linecolor='white',
+    #                     linewidths=.1, annot=True, fmt='d', ax=ax[0]).set_title('Islands')
+    #         sns.heatmap(array, square=True, cbar=False,
+    #                     linecolor='white', linewidths=.1, annot=True, fmt='.1f', ax=ax[1]
+    #                     ).set_title(f'island #{self.island_number} property: {property}')
+    #     else:
+    #         sns.heatmap(array, square=True, cbar=False,
     #                     linecolor='white', linewidths=.1, annot=True, fmt='.1f'
     #                     ).set_title(f'island #{self.island_number} property: {property}')
 
@@ -261,15 +275,66 @@ def get_move_actions(board: np.array, weights):
     return actions
 
 
+def multithreading_get_move_actions(board: np.array, weights):
+    actions = []
+
+    islands = board.island_active
+    islands.remove(0)
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for island in islands:
+
+            board.set_island_number(island)
+
+            a = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
+            a[board.tile_live == False] = np.nan
+            a_padded = np.pad(a, 1, mode='constant', constant_values=np.nan)
+            mask = np.array([[np.nan,1,np.nan], [1,np.nan,1], [np.nan,1,np.nan]])
+
+            indices = np.where(board.units_me)        
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                for row, col in zip(indices[0], indices[1]):
+                    scores = a_padded[row:row+3, col:col+3] * mask
+                    if np.isnan(scores).all():
+                        continue
+                    row_offset, col_offset = [x - y for x, y in zip(np.unravel_index(np.nanargmax(scores), scores.shape), (1, 1))]
+                    actions.append(f"MOVE 1 {col} {row} {col + col_offset} {row + row_offset}")
+    
+    board.reset_island_number()
+    return actions
+
+
+def get_spawn_new(board, weights, k=1):
+    actions = []
+    new_spawns = np.zeros(board.should_spawn.shape, dtype=np.float16)
+    scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
+    scores = scores * board.should_spawn
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for i in range(k):
+            new_spawn_penalty = -3 * min_max(convolve2d(new_spawns, board.kernel_global, mode='same'))
+            row, col = np.unravel_index(np.nanargmax(scores + new_spawn_penalty), scores.shape)
+            actions.append(f"SPAWN 1 {col} {row}")
+            new_spawns[row, col] += 1
+            debug(f"SPAWN 1 {col} {row}")
+    return actions
+
+
 def get_spawn(board, weights, k=1):
     actions = []
     scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
     scores = scores * board.should_spawn
-    for i in range(k):
-        row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
-        actions.append(f"SPAWN 1 {col} {row}")
-        scores[row, col] = np.nan    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for i in range(k):
+            row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
+            actions.append(f"SPAWN 1 {col} {row}")
     return actions
+
+# fig, ax = plt.subplots(4, sharex=True)
+# sns.heatmap(board.island, square=True, cbar=False, linecolor='white', linewidths=.1, annot=True, fmt='d', ax=ax[0])
+# sns.heatmap(new_spawns, square=True, cbar=False, linecolor='white', linewidths=.1, annot=True, fmt='.1f', ax=ax[1])
+# sns.heatmap(scores, square=True, cbar=False, linecolor='white', linewidths=.1, annot=True, fmt='.1f', ax=ax[2])
+# sns.heatmap(scores + new_spawn_penalty, square=True, cbar=False, linecolor='white', linewidths=.1, annot=True, fmt='.1f', ax=ax[3])
 
 
 def get_build(board, weights, k=1):
@@ -325,7 +390,7 @@ class InputOutput:
 
 
 def main():
-    io = InputOutput('p272_crash.txt')
+    io = InputOutput('spawn_spread.txt')
     col, row = io.get_input()
     perf = []
     move_weights = {
@@ -355,7 +420,8 @@ def main():
             input_array = np.array(io.get_input(row * col)).reshape(row, col, 7)
             board = Board(input_array)
             actions = []
-            actions += get_move_actions(board, move_weights)
+            actions += multithreading_get_move_actions(board, move_weights)
+
             if board.units_op.sum() > 0:
                 if my_matter >= 10 and board.should_build.sum() > 0:
                     if board.recycler_me.sum() / board.should_build.sum() < 0.1:
@@ -364,8 +430,8 @@ def main():
                             actions += new_build_actions
                             my_matter -= 10
                 if my_matter >= 10 and board.should_spawn.sum() > 0:
-                    k = (my_matter) // 10
-                    actions += get_spawn(board, spawn_weights, k)
+                    k = min(3, (my_matter) // 10)
+                    actions += get_spawn_new(board, spawn_weights, k)
                     my_matter -= k * 10
             perf_end = perf_counter()
             perf.append(round((perf_end - perf_start) * 1000, 1))
