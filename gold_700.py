@@ -3,7 +3,7 @@ dev = False if __file__ == '/tmp/Answer.py' else True
 import sys
 import concurrent.futures
 import numpy as np
-from scipy.signal import convolve2d
+from scipy.signal import fftconvolve
 from scipy import ndimage
 from time import perf_counter
 # import matplotlib.pyplot as plt
@@ -180,42 +180,42 @@ class Board:
 
     @property
     def scrap_amount_local(self):
-        func = convolve2d(self.scrap_amount * self.island_mask, self.kernel_manhattan, mode='same')
+        func = fftconvolve(self.scrap_amount * self.island_mask, self.kernel_manhattan, mode='same')
         return self.cached('scrap_amount_local', func)
 
     # @property
     # def tile_live_global(self):
-    #     func = convolve2d(self.tile_live * self.island_mask, self.kernel_global, mode='same')
+    #     func = fftconvolve(self.tile_live * self.island_mask, self.kernel_global, mode='same')
     #     return self.cached('tile_live_global', func)
 
     @property
     def owner_me_global(self):
-        func = convolve2d(self.owner_me * self.island_mask, self.kernel_global, mode='same')
+        func = fftconvolve(self.owner_me * self.island_mask, self.kernel_global, mode='same')
         return self.cached('owner_me_global', func)
 
     @property
     def owner_op_global(self):
-        func = convolve2d(self.owner_op * self.island_mask, self.kernel_global, mode='same')
+        func = fftconvolve(self.owner_op * self.island_mask, self.kernel_global, mode='same')
         return self.cached('owner_op_global', func)
 
     @property
     def owner_ne_global(self):
-        func = convolve2d(self.owner_ne * self.island_mask, self.kernel_global, mode='same')
+        func = fftconvolve(self.owner_ne * self.island_mask, self.kernel_global, mode='same')
         return self.cached('owner_ne_global', func)
 
     # @property
     # def owner_op_3_3_sq(self):
-    #     func = convolve2d(self.owner_op * self.island_mask, self.kernel_3_3_ones, mode='same')
+    #     func = fftconvolve(self.owner_op * self.island_mask, self.kernel_3_3_ones, mode='same')
     #     return self.cached('owner_op_3_3_sq', func)
 
     @property
     def units_op_global(self):
-        func = convolve2d(self.units_op * self.island_mask, self.kernel_global, mode='same')
+        func = fftconvolve(self.units_op * self.island_mask, self.kernel_global, mode='same')
         return self.cached('units_op_global', func)
 
     @property
     def units_me_global(self):
-        func = convolve2d(self.units_me * self.island_mask, self.kernel_global, mode='same')
+        func = fftconvolve(self.units_me * self.island_mask, self.kernel_global, mode='same')
         return self.cached('units_me_global', func)
 
     # def print_islands(self):
@@ -314,7 +314,7 @@ def get_spawn_new(board, weights, k=1):
     # scores[board.should_spawn == False] = np.nan
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for i in range(k):
-            new_spawn_penalty = -5 * min_max(convolve2d(new_spawns, board.kernel_global, mode='same'))
+            new_spawn_penalty = -5 * min_max(fftconvolve(new_spawns, board.kernel_global, mode='same'))
             row, col = np.unravel_index(np.nanargmax(scores + new_spawn_penalty), scores.shape)
             actions.append(f"SPAWN 1 {col} {row}")
             new_spawns[row, col] += 1
