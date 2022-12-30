@@ -310,9 +310,11 @@ def get_spawn_new(board, weights, k=1):
     new_spawns = np.zeros(board.should_spawn.shape, dtype=np.float16)
     scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
     scores = scores * board.should_spawn
+    # should be below, not above... although got p700 with error above
+    # scores[board.should_spawn == False] = np.nan
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for i in range(k):
-            new_spawn_penalty = -3 * min_max(convolve2d(new_spawns, board.kernel_global, mode='same'))
+            new_spawn_penalty = -5 * min_max(convolve2d(new_spawns, board.kernel_global, mode='same'))
             row, col = np.unravel_index(np.nanargmax(scores + new_spawn_penalty), scores.shape)
             actions.append(f"SPAWN 1 {col} {row}")
             new_spawns[row, col] += 1
@@ -324,6 +326,8 @@ def get_spawn(board, weights, k=1):
     actions = []
     scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
     scores = scores * board.should_spawn
+    # should be below, not above... although got p700 with error above
+    # scores[board.should_spawn == False] = np.nan
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for i in range(k):
             row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
@@ -341,6 +345,9 @@ def get_build(board, weights, k=1):
     actions = []
     scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
     scores = scores * board.should_build * (board.in_range_of_recycler == 0)
+    # should be below, not above... although got p700 with error above
+    # scores[board.should_build == False] = np.nan
+    # scores[board.in_range_of_recycler == True] = np.nan
     for i in range(k):
         row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
         actions.append(f"BUILD {col} {row}")
@@ -388,9 +395,6 @@ class InputOutput:
 # - On island , Move to switch to path based only
 # - Remove islands entirely from conv gradients or make unique gradients for each cluster 
 
-# SPAWN - add premimum if tile_will_die_in_t_2 (to get unit into enemy zone before blocked)
-# BUILD - net_tile_ownership_if_built
-
 
 def main():
     io = InputOutput('spawn_spread.txt')
@@ -424,11 +428,14 @@ def main():
             board = Board(input_array)
             actions = []
             actions += multithreading_get_move_actions(board, move_weights)
+
             if board.units_op.sum() > 0:
                 if my_matter >= 10 and board.should_build.sum() > 0:
                     if board.recycler_me.sum() / board.should_build.sum() < 0.1:
-                        actions += get_build(board, build_weights)
-                        my_matter -= 10
+                        new_build_actions = get_build(board, build_weights)
+                        if new_build_actions:
+                            actions += new_build_actions
+                            my_matter -= 10
                 if my_matter >= 10 and board.should_spawn.sum() > 0:
                     k = min(3, (my_matter) // 10)
                     actions += get_spawn_new(board, spawn_weights, k)

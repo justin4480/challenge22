@@ -1,5 +1,5 @@
 import cProfile
-from p3_get_spawn_update import main
+from p2 import main
 
 # cProfile.run('main()', sort='tottime')
 cProfile.run('main()', sort='cumtime')

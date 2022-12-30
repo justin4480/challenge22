@@ -183,10 +183,25 @@ class Board:
         func = convolve2d(self.scrap_amount * self.island_mask, self.kernel_manhattan, mode='same')
         return self.cached('scrap_amount_local', func)
 
-    # @property
-    # def tile_live_global(self):
-    #     func = convolve2d(self.tile_live * self.island_mask, self.kernel_global, mode='same')
-    #     return self.cached('tile_live_global', func)
+    @property
+    def owner_me_local(self):
+        func = convolve2d(self.owner_me * self.island_mask, self.kernel_manhattan, mode='same')
+        return self.cached('owner_me_global', func)
+
+    @property
+    def owner_op_local(self):
+        func = convolve2d(self.owner_op * self.island_mask, self.kernel_manhattan, mode='same')
+        return self.cached('owner_op_global', func)
+
+    @property
+    def owner_ne_local(self):
+        func = convolve2d(self.owner_ne * self.island_mask, self.kernel_manhattan, mode='same')
+        return self.cached('owner_ne_global', func)
+
+    @property
+    def tile_live_global(self):
+        func = convolve2d(self.tile_live * self.island_mask, self.kernel_global, mode='same')
+        return self.cached('tile_live_global', func)
 
     @property
     def owner_me_global(self):
@@ -217,6 +232,23 @@ class Board:
     def units_me_global(self):
         func = convolve2d(self.units_me * self.island_mask, self.kernel_global, mode='same')
         return self.cached('units_me_global', func)
+
+    @property
+    def units_op_local(self):
+        func = convolve2d(self.units_op * self.island_mask, self.kernel_manhattan, mode='same')
+        return self.cached('units_op_global', func)
+
+    @property
+    def units_me_local(self):
+        func = convolve2d(self.units_me * self.island_mask, self.kernel_manhattan, mode='same')
+        return self.cached('units_me_global', func)
+
+    @property
+    def center_global(self):
+        row, col = self._input_array[:, :, 0].shape
+        array = np.zeros(self._input_array[:, :, 0].shape)
+        array[:, col // 2] = 1
+        return convolve2d(array * self.island_mask, self.kernel_global, mode='same')
 
     # def print_islands(self):
     #     sns.heatmap(self.island, square=True, cbar=False, linecolor='white',
@@ -309,21 +341,20 @@ def get_spawn_new(board, weights, k=1):
     actions = []
     new_spawns = np.zeros(board.should_spawn.shape, dtype=np.float16)
     scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
-    scores = scores * board.should_spawn
+    scores[board.should_spawn == False] = np.nan
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for i in range(k):
             new_spawn_penalty = -3 * min_max(convolve2d(new_spawns, board.kernel_global, mode='same'))
             row, col = np.unravel_index(np.nanargmax(scores + new_spawn_penalty), scores.shape)
             actions.append(f"SPAWN 1 {col} {row}")
             new_spawns[row, col] += 1
-            debug(f"SPAWN 1 {col} {row}")
     return actions
 
 
 def get_spawn(board, weights, k=1):
     actions = []
     scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
-    scores = scores * board.should_spawn
+    scores[board.should_spawn == False] = np.nan
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for i in range(k):
             row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
@@ -340,11 +371,11 @@ def get_spawn(board, weights, k=1):
 def get_build(board, weights, k=1):
     actions = []
     scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
-    scores = scores * board.should_build * (board.in_range_of_recycler == 0)
+    scores[board.should_build == False] = np.nan
     for i in range(k):
         row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
         actions.append(f"BUILD {col} {row}")
-        scores[row, col] = np.nan    
+        # scores[row, col] = np.nan
     return actions
 
 
@@ -397,22 +428,26 @@ def main():
     col, row = io.get_input()
     perf = []
     move_weights = {
-        'owner_op_global':    +20,
-        'owner_me_global':    -10,
-        'owner_ne_global':    +10,
-        'units_op_global':    +15,
-        'units_me_global':    -15,
+        'owner_op_global':    +4,
+        'owner_me_global':    -2,
+        'owner_ne_global':    +2,
+        'units_op_global':    +3,
+        'units_me_global':    -3,
     }
     spawn_weights = {
-        'owner_op_global':    +40,
-        'owner_ne_global':    +10,
-        'units_me_global':    -10,
+        'owner_op_local':     +2,
+        'owner_ne_local':     +1,
     }
     build_weights = {
-        'scrap_amount_local': +20,
-        'owner_op_global':    +20,
-        'owner_ne_global':    +10,
-        'units_me_global':    -20,
+        'tile_live_global':  -4,
+        'owner_op_global':   +4,
+        'owner_ne_global':   +4,
+        'owner_op_local':    -4,
+        'owner_ne_local':    -1,
+        'owner_me_local':    +1,
+        'units_op_local':    -2,
+        'units_me_local':    -2,
+        'center_global':     +9,
     }
 
 
@@ -430,7 +465,7 @@ def main():
                         actions += get_build(board, build_weights)
                         my_matter -= 10
                 if my_matter >= 10 and board.should_spawn.sum() > 0:
-                    k = min(3, (my_matter) // 10)
+                    k = min(5, (my_matter) // 10)
                     actions += get_spawn_new(board, spawn_weights, k)
                     my_matter -= k * 10
             perf_end = perf_counter()
