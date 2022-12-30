@@ -1,5 +1,5 @@
 import cProfile
-from p2 import main
+from gold_700 import main
 
 # cProfile.run('main()', sort='tottime')
 cProfile.run('main()', sort='cumtime')
