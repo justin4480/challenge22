@@ -45,7 +45,7 @@ def get_filter(rows, cols, p):
 
 class Board:
 
-    def __init__(self, input_array, p=0.85):
+    def __init__(self, input_array, p=0.95):
         self._input_array = input_array
         self._input_array[:, :, 1] = np.where(self._input_array[:, :, 1] == 0, 2, self._input_array[:, :, 1])
         self.kernel_3_3_ones = np.ones((3, 3))
@@ -431,7 +431,7 @@ def main():
 
             if board.units_op.sum() > 0:
                 if my_matter >= 10 and board.should_build.sum() > 0:
-                    if board.recycler_me.sum() / board.should_build.sum() < 0.1:
+                    if board.recycler_me.sum() / board.should_build.sum() < 0.25:
                         new_build_actions = get_build(board, build_weights)
                         if new_build_actions:
                             actions += new_build_actions
