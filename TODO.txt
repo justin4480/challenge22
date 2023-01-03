@@ -1,0 +1,26 @@
+get inputs
+
+board setup
+
+defensive zone breach
+ - build
+ - spawn
+
+offensive zone breach
+ - spawn
+
+island (shared)
+ - move
+ - spawn (if avaliable)
+
+island (capture but incomplete)
+ - move
+ - spawn (if avaliable)
+
+
+spawn
+------------------------
+for island in islands:
+   for i in range(k):
+      actions += 
+return select k best

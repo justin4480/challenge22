@@ -56,13 +56,10 @@ class Board:
             [[0, 1, 0],
              [1, 1, 1],
              [0, 1, 0]])
-        self.kernel_global = get_filter(
-            input_array.shape[0],
-            input_array.shape[1],
-            p=(74 + (2 * (self.width-12))) / 100)
+        self.kernel_global = get_filter(self.height, self.width, p=(74 + (2 * (self.width-12))) / 100)
         self._cached_properties = {}
         self.island_number = 0  # zero is all
-        self.island_mask = np.ones((self._input_array.shape[0], self._input_array.shape[1]))
+        self.island_mask = np.ones((self.height, self.width))
         self.island = ndimage.label(
             input=((self._input_array[:, :, 0] > 0) * (self._input_array[:, :, 3] == 0)),
             structure=self.kernel_manhattan,
@@ -76,28 +73,34 @@ class Board:
         self.island_complete = self.island_captured_op | self.island_captured_me.difference(self.island_presence_ne)
         self.island_active = set(np.unique(self.island)).difference(self.island_complete)
         self.zones = self.get_zones()
-        self.kernel_defensive = (
-            np.array([[0, 1, 0], [1, 0, 0], [0, 1, 0]])
-            if self.zones[:, :self.zones.shape[1] // 2].sum() > self.zones[:, self.zones.shape[1] // 2:].sum()
-            else np.array([[0, 1, 0], [0, 0, 1], [0, 1, 0]])
-        )
+        self.me_right = self.zones[:, :self.zones.shape[1] // 2].sum() > self.zones[:, self.zones.shape[1] // 2:].sum()
+        self.kernel_defensive = (np.array([[0, 1, 0], [1, 0, 0], [0, 1, 0]])if self.me_right else
+                                 np.array([[0, 1, 0], [0, 0, 1], [0, 1, 0]]))
 
     def get_zones(self):
         df = pd.DataFrame(
             data=[(row, col, self.owner_me[row, col])
-                for row in range(self.owner_me.shape[0])
-                for col in range(self.owner_me.shape[1])],
+                for row in range(self.height)
+                for col in range(self.width)],
             columns=['row', 'col', 'owner_me'])
-        lr = LogisticRegression(class_weight='balanced')
+        lr = LogisticRegression(class_weight='balanced', n_jobs=1)
         lr.fit(X=df[['row', 'col']], y=df.owner_me) 
-        return lr.predict(df[['row', 'col']]).reshape(self.owner_me.shape)
+        return lr.predict(df[['row', 'col']]).reshape((self.height, self.width))
+
+    def set_island_number(self, island_number):
+        self.island_number = island_number
+        self.island_mask = (self.island == self.island_number)
+
+    def reset_island_number(self):
+        self.island_number = 0
+        self.island_mask = np.ones((self.height, self.width))
 
     def cached(self, propery_name, func):
         if propery_name not in self._cached_properties:
             self._cached_properties[propery_name] = {}
         if self.island_number not in self._cached_properties[propery_name]:
-            if verbose:
-                debug(f'updating cache for island {self.island_number} propery {propery_name}')
+            # if verbose:
+            #     debug(f'updating cache for island {self.island_number} propery {propery_name}')
             self._cached_properties[propery_name][self.island_number] = func
         return self._cached_properties[propery_name][self.island_number]
 
@@ -274,48 +277,71 @@ class Board:
         func = fftconvolve(self.units_me * self.island_mask, self.kernel_global, mode='same')
         return self.cached('units_me_global', func)
 
+    @property
+    def op_end_global(self):
+        col = self.width-1 if self.me_right else 0
+        op_end = np.zeros((self.height, self.width), dtype=int)
+        op_end[:, col] = 1
+        func = fftconvolve(op_end, self.kernel_global, mode='same')
+        return self.cached('op_end_global', func)
+
 def get_move_actions(board, weights):
     actions = []
-    scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
-    scores[board.live_active_tile == False] = np.nan
-    scores_padded = np.pad(scores, 1, mode='constant', constant_values=np.nan)
-    mask = np.array([[np.nan,1,np.nan], [1,np.nan,1], [np.nan,1,np.nan]])
-    indices = np.where(board.units_me * board.live_active_tile)
-    for row, col in zip(indices[0], indices[1]):
-        scores = scores_padded[row:row+3, col:col+3] * mask
-        if np.isnan(scores).all():
-            continue
-        row_offset, col_offset = [x - y for x, y in zip(np.unravel_index(np.nanargmax(scores), scores.shape), (1, 1))]
-        actions.append(f"MOVE 1 {col} {row} {col + col_offset} {row + row_offset}")
+    islands = list(board.island_active)
+    islands.remove(0)
+    for island in islands:
+        board.set_island_number(island)
+        scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
+        scores[board.live_active_tile == False] = np.nan
+        scores_padded = np.pad(scores, 1, mode='constant', constant_values=np.nan)
+        mask = np.array([[np.nan,1,np.nan], [1,np.nan,1], [np.nan,1,np.nan]])
+        indices = np.where(board.units_me * board.live_active_tile)
+        for row, col in zip(indices[0], indices[1]):
+            scores = scores_padded[row:row+3, col:col+3] * mask
+            if np.isnan(scores).all():
+                continue
+            row_offset, col_offset = [x - y for x, y in zip(np.unravel_index(np.nanargmax(scores), scores.shape), (1, 1))]
+            actions.append(f"MOVE 1 {col} {row} {col + col_offset} {row + row_offset}")
+    board.reset_island_number()
     return actions
 
-def get_spawn(board, weights, k=1):
+def get_spawn_actions(board, weights, k=1):
     actions = []
-    new_spawns = np.zeros(board.should_spawn.shape, dtype=np.float16)
-    scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
-    scores[board.can_spawn == False] = np.nan
-    scores[board.live_active_tile == False] = np.nan
-    for i in range(k):
-        if np.isnan(scores).all():
-            break
-        new_spawn_penalty = -5 * min_max(fftconvolve(new_spawns, board.kernel_global, mode='same'))
-        row, col = np.unravel_index(np.nanargmax(scores + new_spawn_penalty), scores.shape)
-        actions.append(f"SPAWN 1 {col} {row}")
-        new_spawns[row, col] += 1
-        scores[row, col] = np.nan
+    islands = list(board.island_active)
+    islands.remove(0)
+    for island in islands:
+        board.set_island_number(island)
+        new_spawns = np.zeros((board.height, board.width), dtype=np.float16)
+        scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
+        scores[board.can_spawn == False] = np.nan
+        scores[board.live_active_tile == False] = np.nan
+        for i in range(k):
+            if np.isnan(scores).all():
+                break
+            new_spawn_penalty = -5 * min_max(fftconvolve(new_spawns, board.kernel_global, mode='same'))
+            row, col = np.unravel_index(np.nanargmax(scores + new_spawn_penalty), scores.shape)
+            actions.append(f"SPAWN 1 {col} {row}")
+            new_spawns[row, col] += 1
+            scores[row, col] = np.nan
+    board.reset_island_number()
     return actions
 
-def get_build(board, weights, k=1):
+def get_build_actions(board, weights, k=1):
     actions = []
-    scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
-    scores[board.can_build == False] = np.nan
-    scores[board.live_shared_tile == False] = np.nan
-    for i in range(k):
-        if np.isnan(scores).all():
-            break
-        row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
-        actions.append(f"BUILD {col} {row}")
-        scores[row, col] = np.nan
+    islands = list(board.island_active)
+    islands.remove(0)
+    for island in islands:
+        board.set_island_number(island)
+        scores = np.nansum([weight * min_max(getattr(board, feature)) for feature, weight in weights.items()], axis=0)
+        scores[board.can_build == False] = np.nan
+        scores[board.live_shared_tile == False] = np.nan
+        for i in range(k):
+            if np.isnan(scores).all():
+                break
+            row, col = np.unravel_index(np.nanargmax(scores), scores.shape)
+            actions.append(f"BUILD {col} {row}")
+            scores[row, col] = np.nan
+    board.reset_island_number()
     return actions
 
 
@@ -338,42 +364,26 @@ class InputOutput:
             return [int(item) for sublist in lst for item in sublist]
 
     def send_action(self, actions: list):
-        if len(actions) == 0:
-            actions = ["WAIT"]
         message = ";".join(action.__str__() for action in actions)
-        if print_input_logs:
-            self.output_log.append(message)
         print(f"{message}")
-
-# TODO
-# - capture and print the spawn max, min, mean & std (for threshold tuning)
-# - spawn if op units > me units
-# - Agression - Build / spawn rate dynamic to my tiles / op tiles 
-# - Spawn - Edge of op else edge of ne
-
-# - islands - Consider unique boards / games per island (Use masks? * layer / cluster 3 )
-# - island domination:
-#       - dominated - spawn more, build less
-#       - dominating - Spawn less, build more
-
-# - On island , Move to switch to path based only
-# - Remove islands entirely from conv gradients or make unique gradients for each cluster 
-
 
 def main():
     io = InputOutput('p272_crash.txt')
     col, row = io.get_input()
     perf = []
     move_weights = {
+        'op_end_global':    +5,
         'owner_me_local':   -1,
         'owner_ne_local':   +1,
-        'owner_op_local':   +1,
-        'owner_op_global':  +5,
+        # 'owner_op_local':   +1,
+        'owner_op_global':  +3,
+        # 'owner_ne_global':  +2,
     }
     spawn_weights = {
+        'op_end_global':    +5,
         'owner_op_local':   +4,
-        'owner_ne_local':   +1,
-        'units_me_global':  -1,
+        'owner_ne_local':   +3,
+        # 'units_me_global':  -1,
     }
     build_weights = {
         # 'owner_me_global':  -5,
@@ -382,10 +392,16 @@ def main():
 
 
     while True:
+        perf_start = perf_counter()
         try:
-            perf_start = perf_counter()
+            # Get Inputs
+            stopclock = perf_counter()
             my_matter, op_matter = io.get_input()
             input_array = np.array(io.get_input(row * col)).reshape(row, col, 7)
+            debug(f'{int(round((perf_counter() - stopclock) * 1000, 0))} ms\tGet Inputs')
+
+            # Board Setup
+            stopclock = perf_counter()
             board = Board(input_array)
             actions = []
             if verbose:
@@ -399,8 +415,12 @@ def main():
                 debug(board.live_shared_tile.astype(int))
                 debug(f'\nBreaches\n{"-"*40}')
                 debug(board.zone_breach_op_unit_positions)
+            debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tBoard Setup')
+            stopclock = perf_counter()
+            
 
             # deal with zone breaches
+            stopclock = perf_counter()
             verbose and debug(f'\nZone Breach actions ({my_matter})\n{"-"*40}')
             if board.zone_breach_op_unit_positions.sum() == 0:
                 verbose and debug('No zone breaches')
@@ -417,44 +437,57 @@ def main():
                 verbose and debug(f'{affordable_zone_breach_actions=}')
                 actions += affordable_zone_breach_actions
                 my_matter -= len(affordable_zone_breach_actions) * 10
+            debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet Zone Breach actions')
 
             # get MOVE actions
+            stopclock = perf_counter()
             verbose and debug(f'\nMOVE actions ({my_matter})\n{"-"*40}')
             if board.units_me.sum() > 0:
                 move_actions = get_move_actions(board, move_weights)
                 verbose and debug(f'{move_actions=}')
                 actions += move_actions
+            debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet MOVE actions')
 
             # get BUILD actions
+            stopclock = perf_counter()
             verbose and debug(f'\nBUILD actions ({my_matter})\n{"-"*40}')
             if my_matter < 10:
                 verbose and debug(f'Not enought matter for BUILD actions')
-            elif board.recycler_me.sum() / (1e-7 + (board.owner_me * board.live_active_tile).sum()) > .15:
+            elif board.recycler_me.sum() / (1e-7 + (board.owner_me * board.live_active_tile).sum()) > .25:
                 verbose and debug(f'More than 15% of my tiles are recyclers')
             else:
-                build_actions = get_build(board, build_weights)
+                build_actions = get_build_actions(board, build_weights)
                 verbose and debug(f'{build_actions=}')
                 actions += build_actions
                 my_matter -= len(build_actions) * 10
+            debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet BUILD actions')
 
             # get SPAWN actions
+            stopclock = perf_counter()
             verbose and debug(f'\nSPAWN actions ({my_matter})\n{"-"*40}')
             if my_matter < 10:
                 verbose and debug(f'Not enought matter for BUILD actions')
             elif board.live_active_tile.sum() == 0:
                 verbose and debug(f'No live active tiles to SPAWN to')
             else:
-                spawn_actions = get_spawn(board, spawn_weights, k=my_matter // 10)
+                spawn_actions = get_spawn_actions(board, spawn_weights, k=my_matter // 10)
                 verbose and debug(f'{spawn_actions=}')
                 actions += spawn_actions
                 my_matter -= len(spawn_actions) * 10
+            debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet SPAWN actions')
 
-
-            perf_end = perf_counter()
-            perf.append(round((perf_end - perf_start) * 1000, 1))
+            # Print Actions
+            stopclock = perf_counter()
             verbose and debug(f'\nFinal Actions ({my_matter})\n{"-"*40}')
+            perf.append(round((perf_counter() - perf_start) * 1000, 1))
+            actions += ["WAIT"] if len(actions) == 0 else []
             actions += [f'MESSAGE {perf[-1:][0]}ms ({round(np.mean(perf), 1)}ms)']
             io.send_action(actions)
+            debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tPrint actions')
+
+            # Print Logs
+            debug(f'{perf[-1:][0]}ms - Total turn time')
+
         except EOFError:
             verbose and debug("EOF")
             break
