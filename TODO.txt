@@ -6,21 +6,13 @@ defensive zone breach
  - build
  - spawn
 
-offensive zone breach
- - spawn
+maintain min recyclers
+ - build
 
-island (shared)
+offensive (shared island)
  - move
  - spawn (if avaliable)
 
-island (capture but incomplete)
+mopup (captured but incomplete island)
  - move
  - spawn (if avaliable)
-
-
-spawn
-------------------------
-for island in islands:
-   for i in range(k):
-      actions += 
-return select k best
