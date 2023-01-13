@@ -371,36 +371,21 @@ def main():
     io = InputOutput('p272_crash.txt')
     col, row = io.get_input()
     perf = []
-    move_weights = {
-        'op_end_global':    +5,
-        'owner_me_local':   -1,
-        'owner_ne_local':   +1,
-        # 'owner_op_local':   +1,
-        'owner_op_global':  +3,
-        # 'owner_ne_global':  +2,
-    }
-    spawn_weights = {
-        'op_end_global':    +5,
-        'owner_op_local':   +4,
-        'owner_ne_local':   +3,
-        # 'units_me_global':  -1,
-    }
-    build_weights = {
-        # 'owner_me_global':  -5,
-        'units_op_global':  +1,
-    }
-
 
     while True:
         perf_start = perf_counter()
         try:
+            # ======================================================================================
             # Get Inputs
+            # ======================================================================================
             stopclock = perf_counter()
             my_matter, op_matter = io.get_input()
             input_array = np.array(io.get_input(row * col)).reshape(row, col, 7)
             debug(f'{int(round((perf_counter() - stopclock) * 1000, 0))} ms\tGet Inputs')
 
+            # ======================================================================================
             # Board Setup
+            # ======================================================================================    
             stopclock = perf_counter()
             board = Board(input_array)
             actions = []
@@ -419,7 +404,9 @@ def main():
             stopclock = perf_counter()
             
 
-            # deal with zone breaches
+            # ======================================================================================
+            # Defensive Zone Breach BUILD / SPAWN actions
+            # ======================================================================================
             stopclock = perf_counter()
             verbose and debug(f'\nZone Breach actions ({my_matter})\n{"-"*40}')
             if board.zone_breach_op_unit_positions.sum() == 0:
@@ -439,16 +426,30 @@ def main():
                 my_matter -= len(affordable_zone_breach_actions) * 10
             debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet Zone Breach actions')
 
+            # ======================================================================================
             # get MOVE actions
+            # ======================================================================================
             stopclock = perf_counter()
             verbose and debug(f'\nMOVE actions ({my_matter})\n{"-"*40}')
             if board.units_me.sum() > 0:
-                move_actions = get_move_actions(board, move_weights)
+                move_actions = get_move_actions(
+                    board=board,
+                    weights={
+                        'op_end_global':    +5,
+                        'owner_me_local':   -1,
+                        'owner_ne_local':   +1,
+                        # 'owner_op_local':   +1,
+                        'owner_op_global':  +3,
+                        # 'owner_ne_global':  +2,
+                    }
+                )
                 verbose and debug(f'{move_actions=}')
                 actions += move_actions
             debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet MOVE actions')
 
+            # ======================================================================================
             # get BUILD actions
+            # ======================================================================================
             stopclock = perf_counter()
             verbose and debug(f'\nBUILD actions ({my_matter})\n{"-"*40}')
             if my_matter < 10:
@@ -456,13 +457,21 @@ def main():
             elif board.recycler_me.sum() / (1e-7 + (board.owner_me * board.live_active_tile).sum()) > .25:
                 verbose and debug(f'More than 15% of my tiles are recyclers')
             else:
-                build_actions = get_build_actions(board, build_weights)
+                build_actions = get_build_actions(
+                    board=board,
+                    weights={
+                        # 'owner_me_global':  -5,
+                        'units_op_global':  +1,
+                    }
+                )
                 verbose and debug(f'{build_actions=}')
                 actions += build_actions
                 my_matter -= len(build_actions) * 10
             debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet BUILD actions')
 
+            # ======================================================================================
             # get SPAWN actions
+            # ======================================================================================
             stopclock = perf_counter()
             verbose and debug(f'\nSPAWN actions ({my_matter})\n{"-"*40}')
             if my_matter < 10:
@@ -470,13 +479,24 @@ def main():
             elif board.live_active_tile.sum() == 0:
                 verbose and debug(f'No live active tiles to SPAWN to')
             else:
-                spawn_actions = get_spawn_actions(board, spawn_weights, k=my_matter // 10)
+                spawn_actions = get_spawn_actions(
+                    board=board,
+                    weights={
+                        'op_end_global':    +5,
+                        'owner_op_local':   +4,
+                        'owner_ne_local':   +3,
+                        # 'units_me_global':  -1,
+                    },
+                    k=my_matter // 10
+                )
                 verbose and debug(f'{spawn_actions=}')
                 actions += spawn_actions
                 my_matter -= len(spawn_actions) * 10
             debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tGet SPAWN actions')
 
+            # ======================================================================================
             # Print Actions
+            # ======================================================================================
             stopclock = perf_counter()
             verbose and debug(f'\nFinal Actions ({my_matter})\n{"-"*40}')
             perf.append(round((perf_counter() - perf_start) * 1000, 1))
@@ -485,7 +505,9 @@ def main():
             io.send_action(actions)
             debug(f'{int(round((perf_counter() - stopclock) * 1000, 1))} ms\tPrint actions')
 
+            # ======================================================================================
             # Print Logs
+            # ======================================================================================
             debug(f'{perf[-1:][0]}ms - Total turn time')
 
         except EOFError:
